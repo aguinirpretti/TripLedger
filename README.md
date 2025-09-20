@@ -55,3 +55,8 @@ O objetivo foi praticar desenvolvimento de aplicações web, dashboards interati
 3. Execute a aplicação:
    ```bash
    streamlit run app.py
+
+4. Utilize usuário e senha do supervisor:
+   ```bash
+   supervisor.trip           # Usuário
+   12345                     # Senha
