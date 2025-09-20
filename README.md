@@ -44,3 +44,14 @@ O objetivo foi praticar desenvolvimento de aplicações web, dashboards interati
    ```bash
    git clone https://github.com/aguinirpretti/TripLedger.git
    cd TripLedger
+   
+2. Crie um ambiente virtual e instale as dependências:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate   # Linux/Mac
+   .venv\Scripts\activate      # Windows
+   pip install -r requirements.txt
+   
+3. Execute a aplicação:
+   ```bash
+   streamlit run app.py
