@@ -1150,7 +1150,7 @@ elif escolha == "Supervisor":
                 df_filtrado = df_filtrado.sort_values(by="Saldo", ascending=False)
                 
                 # Exibir tabela customizada incluindo a nova coluna "Dias de Caixa"
-                st.markdown("### Usuários e Dias de Caixa")
+                st.markdown("### Status de Usuários")
                 # Cabeçalho
                 col_u, col_s, col_sc, col_se, col_stat, col_d = st.columns([2, 2, 2, 2, 1.5, 3])
                 col_u.markdown("**Usuário**")
