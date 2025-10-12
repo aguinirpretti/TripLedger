@@ -45,14 +45,7 @@ except:
 
 # Função para converter string para float aceitando vírgula ou ponto
 def converter_para_float(valor_str):
-    """
-    Converte um valor para float, lidando com diferentes formatos.
-    
-    Casos especiais:
-    - Se o valor vier do banco de dados, pode estar como string com formato americano "45.7"
-    - Se o usuário digitar, pode estar como "45,7" (formato brasileiro)
-    - Se já for número, apenas converte para float
-    """
+
     # Se já for número, apenas converte
     if isinstance(valor_str, (int, float)):
         return float(valor_str)
@@ -194,6 +187,12 @@ def inicializar_banco_dados():
     except sqlite3.OperationalError:
         pass  # Coluna já existe
 
+    # Adicionar coluna caixa_inicio se não existir (data de início da contagem para entradas de caixa do colaborador)
+    try:
+        cursor.execute("ALTER TABLE transacoes ADD COLUMN caixa_inicio TEXT")
+    except sqlite3.OperationalError:
+        pass  # Coluna já existe
+
     conn.commit()
     conn.close()
 
@@ -286,6 +285,26 @@ def verificar_usuario(nome, senha):
         st.error(f"Erro ao verificar usuário: {str(e)}")
         return None
 
+# Utilitário: extrair data (date) de strings nos formatos usados no app
+def extrair_data_para_date(data_str):
+    try:
+        if not data_str:
+            return None
+        s = str(data_str).strip()
+        # ISO YYYY-MM-DD ou YYYY-MM-DD HH:MM:SS
+        if len(s) >= 10 and s[4] == '-':
+            return datetime.strptime(s[:10], '%Y-%m-%d').date()
+        # BR DD/MM/YYYY ou DD/MM/YYYY HH:MM:SS
+        if '/' in s and len(s) >= 10:
+            return datetime.strptime(s[:10], '%d/%m/%Y').date()
+        # fallback: try isoformat parse
+        try:
+            return datetime.fromisoformat(s.split(' ')[0]).date()
+        except:
+            return None
+    except:
+        return None
+
 def adicionar_transacao(usuario, tipo, valor, descricao, perfil, data, foto=None, origem_saldo="colaborador"):
     try:
         # Gerar um ID único para a transação
@@ -310,9 +329,25 @@ def adicionar_transacao(usuario, tipo, valor, descricao, perfil, data, foto=None
                 # Reconstruir a string de data/hora
                 data = data_iso + " " + hora_parte
         except:
-            # Se houver erro na conversão, mantém o formato original
             pass
+
+        # SALDO ANTERIOR DO COLABORADOR (antes de inserir)
+        try:
+            prev_saldo_colab = obter_saldos_separados(usuario).get('colaborador', 0.0)
+        except:
+            prev_saldo_colab = 0.0
             
+        # Definir caixa_inicio quando aplicável (Entrada de Caixa e origem colaborador)
+        # Somente iniciar contagem quando o saldo anterior era zero e a entrada for positiva
+        caixa_inicio = None
+        try:
+            if perfil == "Entrada de Caixa" and origem_saldo == "colaborador" and prev_saldo_colab == 0 and valor_float > 0:
+                d = extrair_data_para_date(data)
+                if d:
+                    caixa_inicio = d.strftime('%Y-%m-%d')
+        except:
+            caixa_inicio = None
+
         # Salvar a foto se existir
         caminho_foto = None
         if foto is not None:
@@ -370,17 +405,32 @@ def adicionar_transacao(usuario, tipo, valor, descricao, perfil, data, foto=None
                 st.error(f"Erro ao processar o upload da foto: {str(e)}")
                 caminho_foto = None
         
-        # Adicionar a transação no banco de dados
+        # Adicionar a transação no banco de dados (inclui caixa_inicio)
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         cursor.execute(
-            "INSERT INTO transacoes (id_transacao, usuario, tipo, valor, descricao, perfil, data, caminho_foto, origem_saldo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (id_transacao, usuario, tipo, valor_float, descricao, perfil, data, caminho_foto, origem_saldo)
+            "INSERT INTO transacoes (id_transacao, usuario, tipo, valor, descricao, perfil, data, caminho_foto, origem_saldo, caixa_inicio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (id_transacao, usuario, tipo, valor_float, descricao, perfil, data, caminho_foto, origem_saldo, caixa_inicio)
         )
         
         conn.commit()
         conn.close()
+        
+        # Após inserir, recalcular saldo do colaborador e, se zerado, limpar caixa_inicio para o usuário
+        try:
+            new_saldo_colab = obter_saldos_separados(usuario).get('colaborador', 0.0)
+            if abs(new_saldo_colab) < 1e-9:  # considerado zero
+                # Limpar todas as caixas_inicio do usuário (reset da contagem)
+                conn2 = sqlite3.connect(DB_PATH)
+                cur2 = conn2.cursor()
+                try:
+                    cur2.execute("UPDATE transacoes SET caixa_inicio = NULL WHERE usuario = ?", (usuario,))
+                    conn2.commit()
+                finally:
+                    conn2.close()
+        except Exception:
+            pass
         
         # Criar backup após adicionar transação
         criar_backup_banco_dados()
@@ -410,7 +460,6 @@ def atualizar_transacao(id_transacao, tipo, valor, descricao, perfil, data, foto
                 # Reconstruir a string de data/hora
                 data = data_iso + " " + hora_parte
         except:
-            # Se houver erro na conversão, mantém o formato original
             pass
         
         # Obter a foto anterior
@@ -1105,29 +1154,70 @@ elif escolha == "Supervisor":
                 # Ordenar por saldo (maior para menor)
                 df_filtrado = df_filtrado.sort_values(by="Saldo", ascending=False)
                 
-                # Exibir tabela com cores
-                st.dataframe(
-                    df_filtrado[["Usuário", "Saldo_Formatado", "Status"]].rename(
-                        columns={"Saldo_Formatado": "Saldo"}
-                    ),
-                    column_config={
-                        "Usuário": st.column_config.TextColumn(
-                            "Usuário",
-                            width="large",
-                        ),
-                        "Saldo": st.column_config.TextColumn(
-                            "Saldo",
-                            width="medium",
-                        ),
-                        "Status": st.column_config.TextColumn(
-                            "Status",
-                            width="medium",
-                        ),
-                    },
-                    use_container_width=True,
-                    hide_index=True,
-                )
+                # Exibir tabela customizada incluindo a nova coluna "Dias de Caixa"
+                st.markdown("### Usuários e Dias de Caixa")
+                # Cabeçalho
+                col_u, col_s, col_stat, col_d = st.columns([3, 2, 2, 3])
+                col_u.markdown("**Usuário**")
+                col_s.markdown("**Saldo**")
+                col_stat.markdown("**Status**")
+                col_d.markdown("**Dias de Caixa**")
 
+                hoje = datetime.now().date()
+                # Para cada usuário calcular dias de caixa aberto (usar último registro de Entrada de Caixa do colaborador)
+                for _, row in df_filtrado.iterrows():
+                    usuario = row["Usuário"]
+                    saldo_fmt = row["Saldo_Formatado"]
+                    status = row["Status"]
+                    cor = row.get("Cor", "black")
+
+                    # Buscar entradas de caixa válidas deste usuário
+                    entradas_caixa = [
+                        t for t in todos_registros
+                        if t.get('usuario') == usuario and t.get('perfil') == 'Entrada de Caixa' and t.get('origem_saldo', 'colaborador') == 'colaborador'
+                    ]
+                    dias_display = ""
+                    dias_color = None  # None / "orange" / "red"
+                    if entradas_caixa:
+                        # Priorizar caixa_inicio se existir, senão usar data
+                        try:
+                            entradas_sorted = sorted(
+                                entradas_caixa,
+                                key=lambda x: extrair_data_para_date(x.get('caixa_inicio') or x.get('data') or ""),
+                                reverse=True
+                            )
+                            ultima = entradas_sorted[0]
+                            data_caixa = extrair_data_para_date(ultima.get('caixa_inicio') or ultima.get('data') or "")
+                            if data_caixa:
+                                dias = (hoje - data_caixa).days
+                                dias_display = f"{dias} dias de caixa em aberto"
+                                # definir cor conforme regras: >=30 vermelho, >=25 laranja
+                                if dias >= 30:
+                                    dias_color = "red"
+                                elif dias >= 25:
+                                    dias_color = "orange"
+                        except:
+                            dias_display = ""
+
+                    # Renderizar linha
+                    col_u, col_s, col_stat, col_d = st.columns([3, 2, 2, 3])
+                    col_u.write(usuario)
+                    # Saldo com cor aproximada
+                    color_map = {"blue":"#0b5394","green":"#198754","orange":"#ff9900","red":"#d9534f"}
+                    saldo_color = color_map.get(cor, "black")
+                    col_s.markdown(f"<span style='color:{saldo_color}; font-weight:bold'>{saldo_fmt}</span>", unsafe_allow_html=True)
+                    col_stat.write(status)
+                    # Exibir sempre dias_display quando existir; colorir conforme dias_color
+                    if dias_display:
+                        if dias_color == "red":
+                            col_d.markdown(f"<span style='color:red; font-weight:bold'>{dias_display}</span>", unsafe_allow_html=True)
+                        elif dias_color == "orange":
+                            col_d.markdown(f"<span style='color:orange; font-weight:bold'>{dias_display}</span>", unsafe_allow_html=True)
+                        else:
+                            col_d.write(dias_display)
+                    else:
+                        col_d.write("")  # sem entrada de caixa válida
+                 
                 # Filtro por mês e ano
                 st.subheader("Filtrar por mês e ano")
                 meses = ["Todos", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -1479,7 +1569,7 @@ elif escolha == "Supervisor":
                         df_final = pd.concat([df_final, df_totais], ignore_index=True)
 
                         # Criar CSV
-                        csv = df_final.to_csv(index=False, sep=";", decimal=",").encode("utf-8")
+                        csv = df_final.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
 
                         st.download_button(
                             label="📄 Baixar CSV das Transações",
@@ -1488,5 +1578,5 @@ elif escolha == "Supervisor":
                             mime="text/csv"
                         )
 
+adicionar_rodape()
 
-        
