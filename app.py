@@ -14,7 +14,7 @@ from PIL import Image
 import io
 
 # Configurar o modo wide
-st.set_page_config(layout="wide", page_title="Gestão Financeira - TripLedger")
+st.set_page_config(layout="wide", page_title="Gestão Financeira - Programa Zelar")
 
 # Adicionar CSS personalizado para o rodapé
 st.markdown("""
@@ -192,6 +192,16 @@ def inicializar_banco_dados():
         cursor.execute("ALTER TABLE transacoes ADD COLUMN caixa_inicio TEXT")
     except sqlite3.OperationalError:
         pass  # Coluna já existe
+    # Adicionar coluna caixa_fim se não existir
+    try:
+        cursor.execute("ALTER TABLE transacoes ADD COLUMN caixa_fim TEXT")
+    except sqlite3.OperationalError:
+        pass  # Coluna já existe
+    # Remover caixa_inicio e caixa_fim, adicionar status_caixa se não existir
+    try:
+        cursor.execute("ALTER TABLE transacoes ADD COLUMN status_caixa TEXT")
+    except sqlite3.OperationalError:
+        pass  # Coluna já existe
 
     conn.commit()
     conn.close()
@@ -331,22 +341,35 @@ def adicionar_transacao(usuario, tipo, valor, descricao, perfil, data, foto=None
         except:
             prev_saldo_colab = 0.0
 
-        # Definir caixa_inicio quando aplicável (REGRAS):
-        # - perfil == "Entrada de Caixa"
-        # - origem_saldo == "colaborador"
-        # - saldo anterior é (praticamente) zero
-        # - após a entrada, o saldo ficará positivo
-        caixa_inicio = None
+        # Definir status_caixa: só para transações de CAIXA (Entrada/Saída de Caixa)
+        status_caixa = None
         try:
             tol = 1e-9
-            if perfil == "Entrada de Caixa" and origem_saldo == "colaborador":
-                saldo_apos = prev_saldo_colab + valor_float
-                if abs(prev_saldo_colab) < tol and saldo_apos > 0:
+            
+            # Apenas transações de CAIXA colaborador podem ter status_caixa
+            if origem_saldo == "colaborador" and perfil in ["Entrada de Caixa", "Saída de Caixa"]:
+                
+                # ABERTURA: Entrada de Caixa quando saldo estava zerado
+                if perfil == "Entrada de Caixa" and abs(prev_saldo_colab) < tol:
                     d = extrair_data_para_date(data)
                     if d:
-                        caixa_inicio = d.strftime('%Y-%m-%d')
+                        status_caixa = d.strftime('%Y-%m-%d')
+                
+                # FECHAMENTO: Saída de Caixa (sempre)
+                elif perfil == "Saída de Caixa":
+                    d = extrair_data_para_date(data)
+                    if d:
+                        status_caixa = d.strftime('%Y-%m-%d')
+                
+                # FECHAMENTO: Entrada de Caixa que zera saldo negativo
+                elif perfil == "Entrada de Caixa":
+                    saldo_apos = prev_saldo_colab + valor_float
+                    if prev_saldo_colab < -tol and abs(saldo_apos) < tol:
+                        d = extrair_data_para_date(data)
+                        if d:
+                            status_caixa = d.strftime('%Y-%m-%d')
         except:
-            caixa_inicio = None
+            status_caixa = None
 
         # Salvar a foto se existir
         caminho_foto = None
@@ -402,31 +425,15 @@ def adicionar_transacao(usuario, tipo, valor, descricao, perfil, data, foto=None
         # Adicionar a transação no banco de dados
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        
         cursor.execute(
-            "INSERT INTO transacoes (id_transacao, usuario, tipo, valor, descricao, perfil, data, caminho_foto, origem_saldo, caixa_inicio) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (id_transacao, usuario, tipo, valor_float, descricao, perfil, data, caminho_foto, origem_saldo, caixa_inicio)
+            "INSERT INTO transacoes (id_transacao, usuario, tipo, valor, descricao, perfil, data, caminho_foto, origem_saldo, status_caixa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (id_transacao, usuario, tipo, valor_float, descricao, perfil, data, caminho_foto, origem_saldo, status_caixa)
         )
-        
         conn.commit()
         conn.close()
-        
-        # Após inserir, verificar se deve limpar caixa_inicio
-        # Regra: se a transação é de Caixa (Entrada/Saída) do colaborador e o saldo ficou ZERO -> limpar contagem
-        try:
-            if origem_saldo == "colaborador" and perfil in ["Entrada de Caixa", "Saída de Caixa"]:
-                new_saldo_colab = obter_saldos_separados(usuario).get('colaborador', 0.0)
-                if abs(new_saldo_colab) < 1e-9:
-                    conn2 = sqlite3.connect(DB_PATH)
-                    cur2 = conn2.cursor()
-                    try:
-                        cur2.execute("UPDATE transacoes SET caixa_inicio = NULL WHERE usuario = ?", (usuario,))
-                        conn2.commit()
-                    finally:
-                        conn2.close()
-        except Exception:
-            pass
-        
+
+        # NÃO limpar status_caixa - as datas devem permanecer para relatórios
+
         # Criar backup após adicionar transação
         criar_backup_banco_dados()
         
@@ -457,14 +464,43 @@ def atualizar_transacao(id_transacao, tipo, valor, descricao, perfil, data, foto
         except:
             pass
         
-        # Obter a foto anterior
+        # Obter dados da transação atual
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        cursor.execute("SELECT caminho_foto FROM transacoes WHERE id_transacao = ?", (id_transacao,))
+        cursor.execute("SELECT caminho_foto, usuario, origem_saldo FROM transacoes WHERE id_transacao = ?", (id_transacao,))
         resultado = cursor.fetchone()
         
-        foto_anterior = resultado[0] if resultado else None
+        if not resultado:
+            conn.close()
+            return False
+            
+        foto_anterior = resultado[0]
+        usuario = resultado[1]
+        origem_saldo = resultado[2] if resultado[2] else 'colaborador'
+        
+        # Calcular saldo ANTES da atualização (removendo o efeito da transação atual)
+        cursor.execute("SELECT perfil, valor FROM transacoes WHERE id_transacao = ?", (id_transacao,))
+        transacao_atual = cursor.fetchone()
+        conn.close()
+        
+        if transacao_atual:
+            perfil_anterior = transacao_atual[0]
+            valor_anterior = transacao_atual[1]
+            
+            # Saldo atual do colaborador
+            saldo_atual = obter_saldos_separados(usuario).get('colaborador', 0.0)
+            
+            # Reverter o efeito da transação anterior para calcular saldo antes dela
+            if origem_saldo == 'colaborador':
+                if perfil_anterior == "Entrada de Caixa":
+                    saldo_antes = saldo_atual - valor_anterior
+                else:
+                    saldo_antes = saldo_atual + valor_anterior
+            else:
+                saldo_antes = saldo_atual
+        else:
+            saldo_antes = obter_saldos_separados(usuario).get('colaborador', 0.0)
             
         # Salvar a foto se existir
         caminho_foto = foto_anterior  # Manter a foto anterior se não houver uma nova
@@ -493,14 +529,51 @@ def atualizar_transacao(id_transacao, tipo, valor, descricao, perfil, data, foto
             except Exception as e:
                 st.error(f"Erro ao processar o upload da foto: {str(e)}")
                 caminho_foto = foto_anterior
+        
+        # Atualizar status_caixa: só para transações de CAIXA (Entrada/Saída de Caixa)
+        status_caixa = None
+        try:
+            tol = 1e-9
+            
+            # Apenas transações de CAIXA colaborador podem ter status_caixa
+            if origem_saldo == "colaborador" and perfil in ["Entrada de Caixa", "Saída de Caixa"]:
+                
+                # ABERTURA: Entrada de Caixa quando saldo estava zerado
+                if perfil == "Entrada de Caixa" and abs(saldo_antes) < tol:
+                    d = extrair_data_para_date(data)
+                    if d:
+                        status_caixa = d.strftime('%Y-%m-%d')
+                
+                # FECHAMENTO: Saída de Caixa (sempre)
+                elif perfil == "Saída de Caixa":
+                    d = extrair_data_para_date(data)
+                    if d:
+                        status_caixa = d.strftime('%Y-%m-%d')
+                
+                # FECHAMENTO: Entrada de Caixa que zera saldo negativo
+                elif perfil == "Entrada de Caixa":
+                    saldo_apos = saldo_antes + valor_float
+                    if saldo_antes < -tol and abs(saldo_apos) < tol:
+                        d = extrair_data_para_date(data)
+                        if d:
+                            status_caixa = d.strftime('%Y-%m-%d')
+        except:
+            status_caixa = None
+
         # Atualizar a transação no banco de dados
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
         cursor.execute(
-            "UPDATE transacoes SET tipo = ?, valor = ?, descricao = ?, perfil = ?, data = ?, caminho_foto = ? WHERE id_transacao = ?",
-            (tipo, valor_float, descricao, perfil, data, caminho_foto, id_transacao)
+            "UPDATE transacoes SET tipo = ?, valor = ?, descricao = ?, perfil = ?, data = ?, caminho_foto = ?, status_caixa = ? WHERE id_transacao = ?",
+            (tipo, valor_float, descricao, perfil, data, caminho_foto, status_caixa, id_transacao)
         )
         
         conn.commit()
         conn.close()
+        
+        # Recalcular status_caixa apenas se for transação de CAIXA colaborador
+        if origem_saldo == 'colaborador' and perfil in ['Entrada de Caixa', 'Saída de Caixa']:
+            recalcular_status_caixa_usuario(usuario)
         
         # Criar backup após atualizar transação
         criar_backup_banco_dados()
@@ -512,14 +585,22 @@ def atualizar_transacao(id_transacao, tipo, valor, descricao, perfil, data, foto
 
 def excluir_transacao(id_transacao):
     try:
-        # Obter o caminho da foto antes de excluir
+        # Obter informações da transação antes de excluir
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        cursor.execute("SELECT caminho_foto FROM transacoes WHERE id_transacao = ?", (id_transacao,))
+        cursor.execute("SELECT caminho_foto, usuario, origem_saldo, perfil, status_caixa FROM transacoes WHERE id_transacao = ?", (id_transacao,))
         resultado = cursor.fetchone()
         
-        caminho_foto = resultado[0] if resultado else None
+        if not resultado:
+            conn.close()
+            return False
+        
+        caminho_foto = resultado[0]
+        usuario = resultado[1]
+        origem_saldo = resultado[2] if resultado[2] else 'colaborador'
+        perfil = resultado[3]
+        tinha_status_caixa = resultado[4]
         
         # Excluir a foto se existir
         if caminho_foto and os.path.exists(caminho_foto):
@@ -530,9 +611,12 @@ def excluir_transacao(id_transacao):
         
         # Excluir a transação do banco de dados
         cursor.execute("DELETE FROM transacoes WHERE id_transacao = ?", (id_transacao,))
-        
         conn.commit()
         conn.close()
+        
+        # Se era uma transação de caixa colaborador que tinha status_caixa, recalcular
+        if origem_saldo == 'colaborador' and perfil in ['Entrada de Caixa', 'Saída de Caixa'] and tinha_status_caixa:
+            recalcular_status_caixa_usuario(usuario)
         
         # Criar backup após excluir transação
         criar_backup_banco_dados()
@@ -541,6 +625,88 @@ def excluir_transacao(id_transacao):
     except Exception as e:
         st.error(f"Erro ao excluir transação: {str(e)}")
         return False
+
+
+def recalcular_status_caixa_usuario(usuario):
+    """
+    Recalcula o status_caixa para todas as transações de caixa do colaborador.
+    Chamada após exclusão ou edição de transações de caixa.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Limpar todos os status_caixa do usuário primeiro
+        cursor.execute("""
+            UPDATE transacoes 
+            SET status_caixa = NULL 
+            WHERE usuario = ? AND origem_saldo = 'colaborador'
+        """, (usuario,))
+        
+        # Buscar todas as transações do usuário ordenadas por data
+        cursor.execute("""
+            SELECT id_transacao, perfil, valor, data, origem_saldo
+            FROM transacoes 
+            WHERE usuario = ? 
+            ORDER BY data ASC
+        """, (usuario,))
+        
+        transacoes = cursor.fetchall()
+        
+        # Simular o saldo para encontrar quando abre e fecha caixa
+        saldo_colab = 0.0
+        tol = 1e-9
+        
+        for trans in transacoes:
+            id_trans, perfil, valor, data, origem = trans
+            
+            # Só processar transações de origem colaborador
+            if origem != 'colaborador':
+                continue
+            
+            saldo_antes = saldo_colab
+            
+            # Atualizar saldo simulado
+            if perfil == "Entrada de Caixa":
+                saldo_colab += valor
+                
+                # Se saldo estava zerado e agora tem entrada, marca abertura
+                if abs(saldo_antes) < tol:
+                    try:
+                        d = extrair_data_para_date(data)
+                        if d:
+                            cursor.execute("""
+                                UPDATE transacoes 
+                                SET status_caixa = ? 
+                                WHERE id_transacao = ?
+                            """, (d.strftime('%Y-%m-%d'), id_trans))
+                    except:
+                        pass
+                        
+            elif perfil == "Saída de Caixa":
+                saldo_colab -= valor
+                
+                # Marca a data de saída (independente do saldo)
+                try:
+                    d = extrair_data_para_date(data)
+                    if d:
+                        cursor.execute("""
+                            UPDATE transacoes 
+                            SET status_caixa = ? 
+                            WHERE id_transacao = ?
+                        """, (d.strftime('%Y-%m-%d'), id_trans))
+                except:
+                    pass
+                    
+            else:
+                # Outras transações (saídas normais)
+                saldo_colab -= valor
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        st.error(f"Erro ao recalcular status_caixa: {str(e)}")
 
 def obter_transacoes_usuario(usuario):
     try:
@@ -679,8 +845,46 @@ def criar_dataframe_transacoes(transacoes):
     df = pd.DataFrame(df_data)
     return df.sort_values(by=["Data_Ordenacao", "Hora"], ascending=False)
 
+# Função para calcular saldo colaborador até uma data limite
+def calcular_saldo_colaborador_ate(usuario, data_limite_str):
+    """
+    Calcula o saldo do colaborador para 'usuario' considerando apenas transações
+    com data STRICTAMENTE menor que data_limite_str (usa apenas a parte de data).
+    Retorna float.
+    """
+    try:
+        trans = obter_transacoes_usuario(usuario)
+        # converter limite para date
+        limite = extrair_data_para_date(data_limite_str)
+        if limite is None:
+            return 0.0
+        saldo = 0.0
+        # ordenar por data (asc)
+        def key_dt(x):
+            d = extrair_data_para_date(x.get('data') or "")
+            return d or datetime.min.date()
+        trans_sorted = sorted(trans, key=key_dt)
+        for t in trans_sorted:
+            d = extrair_data_para_date(t.get('data') or "")
+            if d is None:
+                continue
+            if d < limite:
+                origem = t.get('origem_saldo', 'colaborador')
+                perfil_t = t.get('perfil', '')
+                valor_t = obter_valor_numerico(t.get('valor', 0))
+                if origem == 'colaborador':
+                    if perfil_t == "Entrada de Caixa":
+                        saldo += valor_t
+                    else:
+                        saldo -= valor_t
+            else:
+                break
+        return saldo
+    except:
+        return 0.0
+
 # Interface inicial
-st.title("Gestão Financeira - TripLedger")
+st.title("Gestão Financeira - Programa Zelar")
 
 # Interface principal
 menu = ["Login", "Registrar", "Supervisor"]
@@ -1121,16 +1325,41 @@ elif escolha == "Supervisor":
                 for usuario in usuarios:
                     saldo = obter_saldo(usuario)
                     cor = cor_do_saldo(saldo)
-                    
-                    # Determinar status baseado na cor
                     status = "Excelente" if cor == "blue" else "Bom" if cor == "green" else "Regular" if cor == "orange" else "Negativo"
-                    
+                    # NOVO: calcular data de fechamento do caixa (30 dias após abertura)
+                    # Encontrar caixa_inicio
+                    entradas_candidatas = [
+                        t for t in todos_registros
+                        if t.get('usuario') == usuario
+                        and t.get('perfil') == 'Entrada de Caixa'
+                        and t.get('origem_saldo', 'colaborador') == 'colaborador'
+                        and t.get('status_caixa')
+                    ]
+                    data_fechamento = ""
+                    if entradas_candidatas:
+                        try:
+                            entradas_sorted = sorted(
+                                entradas_candidatas,
+                                key=lambda x: extrair_data_para_date(x.get('status_caixa') or ""),
+                                reverse=True
+                            )
+                            inicio_encontrado = None
+                            for ent in entradas_sorted:
+                                if ent.get('status_caixa'):
+                                    inicio_encontrado = extrair_data_para_date(ent.get('status_caixa'))
+                                    break
+                            if inicio_encontrado:
+                                fechamento = inicio_encontrado + pd.Timedelta(days=30)
+                                data_fechamento = fechamento.strftime('%d/%m/%Y')
+                        except:
+                            data_fechamento = ""
                     dados_usuarios.append({
                         "Usuário": usuario,
                         "Saldo": saldo,
                         "Saldo_Formatado": formatar_valor(saldo),
                         "Status": status,
-                        "Cor": cor
+                        "Cor": cor,
+                        "Data_Fechamento_Caixa": data_fechamento
                     })
                 
                 # Criar dataframe e exibir
@@ -1152,13 +1381,14 @@ elif escolha == "Supervisor":
                 # Exibir tabela customizada incluindo a nova coluna "Dias de Caixa"
                 st.markdown("### Status de Usuários")
                 # Cabeçalho
-                col_u, col_s, col_sc, col_se, col_stat, col_d = st.columns([2, 2, 2, 2, 1.5, 3])
+                col_u, col_s, col_sc, col_se, col_stat, col_d, col_df = st.columns([2, 2, 2, 2, 1.5, 3, 2])
                 col_u.markdown("**Usuário**")
                 col_s.markdown("**Saldo Total**")
                 col_sc.markdown("**Saldo Colab.**")
                 col_se.markdown("**Saldo Emp.**")
                 col_stat.markdown("**Status**")
                 col_d.markdown("**Dias de Caixa**")
+                col_df.markdown("**Fechamento do Caixa**")
 
                 hoje = datetime.now().date()
                 # Para cada usuário calcular dias de caixa aberto
@@ -1167,75 +1397,85 @@ elif escolha == "Supervisor":
                     saldo_total_fmt = row["Saldo_Formatado"]
                     status = row["Status"]
                     cor = row.get("Cor", "black")
-                    
-                    # Obter saldos separados
                     saldos_sep = obter_saldos_separados(usuario)
                     saldo_colab = saldos_sep.get('colaborador', 0.0)
                     saldo_emp = saldos_sep.get('emprestado', 0.0)
                     saldo_colab_fmt = formatar_valor(saldo_colab)
                     saldo_emp_fmt = formatar_valor(saldo_emp)
-
-                    # Candidate entradas: todas as Entradas de Caixa do colaborador
-                    entradas_candidatas = [
+                    
+                    # Buscar transações de caixa do colaborador com status_caixa
+                    transacoes_caixa = [
                         t for t in todos_registros
                         if t.get('usuario') == usuario
-                        and t.get('perfil') == 'Entrada de Caixa'
                         and t.get('origem_saldo', 'colaborador') == 'colaborador'
+                        and t.get('status_caixa')
+                        and t.get('perfil') in ['Entrada de Caixa', 'Saída de Caixa']
                     ]
+                    
                     dias_display = ""
                     dias_color = None
-                    if entradas_candidatas:
+                    data_fechamento = ""
+                    inicio_encontrado = None
+                    fechamento_encontrado = None
+                    
+                    if transacoes_caixa:
                         try:
-                            # Ordenar da mais recente para a mais antiga pela data da transação
-                            entradas_sorted = sorted(
-                                entradas_candidatas,
-                                key=lambda x: extrair_data_para_date(x.get('data') or ""),
-                                reverse=True
+                            # Ordenar por data do status_caixa
+                            transacoes_ordenadas = sorted(
+                                transacoes_caixa,
+                                key=lambda x: extrair_data_para_date(x.get('status_caixa') or ""),
+                                reverse=False  # Do mais antigo para o mais recente
                             )
-                            # Procurar a última entrada que tenha caixa_inicio definido; se não, avaliar candidatos
-                            inicio_encontrado = None
-                            for ent in entradas_sorted:
-                                # se já tem caixa_inicio explícito, usamos ele imediatamente
-                                if ent.get('caixa_inicio'):
-                                    inicio_encontrado = extrair_data_para_date(ent.get('caixa_inicio'))
-                                    break
-                                # senão, verificar condição: saldo ANTES da transação era ~0 e SALDO APÓS > 0
-                                # calcular saldo do colaborador estritamente antes desta transação
-                                data_trans = ent.get('data') or ""
-                                prev_saldo = calcular_saldo_colaborador_ate(usuario, data_trans)
-                                valor_ent = obter_valor_numerico(ent.get('valor', 0))
-                                saldo_depois = prev_saldo + valor_ent
-                                tol = 1e-9
-                                if abs(prev_saldo) < tol and saldo_depois > 0:
-                                    inicio_encontrado = extrair_data_para_date(data_trans)
-                                    break
-                            if inicio_encontrado:
-                                dias = (hoje - inicio_encontrado).days
-                                dias_display = f"{dias} dias de caixa em aberto"
-                                if dias >= 30:
-                                    dias_color = "red"
-                                elif dias >= 25:
-                                    dias_color = "orange"
-                        except:
+                            
+                            # Procurar a última abertura e fechamento
+                            ultima_abertura = None
+                            ultimo_fechamento = None
+                            
+                            for trans in transacoes_ordenadas:
+                                data_status = extrair_data_para_date(trans.get('status_caixa'))
+                                perfil = trans.get('perfil')
+                                
+                                if data_status:
+                                    if perfil == 'Entrada de Caixa':
+                                        ultima_abertura = data_status
+                                    elif perfil == 'Saída de Caixa':
+                                        ultimo_fechamento = data_status
+                            
+                            # Verificar se há caixa aberto (abertura sem fechamento posterior)
+                            if ultima_abertura:
+                                # Se não há fechamento OU o fechamento é anterior à abertura
+                                if not ultimo_fechamento or ultimo_fechamento < ultima_abertura:
+                                    # Caixa está ABERTO
+                                    inicio_encontrado = ultima_abertura
+                                    dias = (hoje - inicio_encontrado).days
+                                    dias_display = f"{dias} dias de caixa em aberto"
+                                    
+                                    if dias >= 30:
+                                        dias_color = "red"
+                                    elif dias >= 25:
+                                        dias_color = "orange"
+                                    
+                                    # Calcular data de fechamento (30 dias após abertura)
+                                    fechamento_calculado = inicio_encontrado + pd.Timedelta(days=30)
+                                    data_fechamento = fechamento_calculado.strftime('%d/%m/%Y')
+                                # Caso contrário, caixa está FECHADO - não mostrar nada
+                        except Exception as e:
+                            # Em caso de erro, não mostrar dias
                             dias_display = ""
-
-                    # Renderizar linha
-                    col_u, col_s, col_sc, col_se, col_stat, col_d = st.columns([2, 2, 2, 2, 1.5, 3])
+                            data_fechamento = ""
+                    
+                    # Renderizar colunas
+                    col_u, col_s, col_sc, col_se, col_stat, col_d, col_df = st.columns([2, 2, 2, 2, 1.5, 3, 2])
                     col_u.write(usuario)
                     
-                    # Saldo total com cor
                     color_map = {"blue":"#0b5394","green":"#198754","orange":"#ff9900","red":"#d9534f"}
                     saldo_color = color_map.get(cor, "black")
                     col_s.markdown(f"<span style='color:{saldo_color}; font-weight:bold'>{saldo_total_fmt}</span>", unsafe_allow_html=True)
-                    
-                    # Saldos separados
                     col_sc.write(saldo_colab_fmt)
                     col_se.write(saldo_emp_fmt)
-                    
-                    # Status
                     col_stat.write(status)
                     
-                    # Dias de caixa - SEMPRE exibir se houver caixa_inicio válido
+                    # Mostrar dias apenas se caixa estiver aberto
                     if dias_display:
                         if dias_color == "red":
                             col_d.markdown(f"<span style='color:red; font-weight:bold'>{dias_display}</span>", unsafe_allow_html=True)
@@ -1244,8 +1484,22 @@ elif escolha == "Supervisor":
                         else:
                             col_d.write(dias_display)
                     else:
-                        col_d.write("")  # Vazio apenas se NÃO houver caixa_inicio
-                 
+                        col_d.write("")
+                    
+                    # Exibir data de fechamento apenas se caixa estiver aberto
+                    if data_fechamento:
+                        # Verificar se já passou da data
+                        try:
+                            fechamento_dt = datetime.strptime(data_fechamento, '%d/%m/%Y').date()
+                            if hoje >= fechamento_dt:
+                                col_df.markdown(f"<span style='color:red; font-weight:bold'>{data_fechamento}</span>", unsafe_allow_html=True)
+                            else:
+                                col_df.markdown(f"<span style='color:blue; font-weight:bold'>{data_fechamento}</span>", unsafe_allow_html=True)
+                        except:
+                            col_df.write(data_fechamento)
+                    else:
+                        col_df.write("")
+                
                 # Filtro por mês e ano
                 st.subheader("Filtrar por mês e ano")
                 meses = ["Todos", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -1555,19 +1809,75 @@ elif escolha == "Supervisor":
                         # Botão para download em CSV
                         df_exportar = df_filtrado_usuario.copy()
 
+                        # Separar Data e Hora em colunas diferentes
+                        df_exportar["Data_Export"] = df_exportar["Data"].apply(lambda x: x.split(" ")[0] if " " in str(x) else str(x))
+                        df_exportar["Hora_Export"] = df_exportar["Hora"]
+
                         # Converter valores para negativos ou positivos com base no tipo (usando coluna "Valor" original)
                         df_exportar["Valor_Num"] = df_exportar.apply(
                             lambda x: -converter_para_float(x["Valor"]) if x["Tipo"] == "Saída" else converter_para_float(x["Valor"]),
                             axis=1
                         )
 
-                        # Separar valores conforme origem_saldo
-                        # Precisamos buscar os dados originais do banco para ter origem_saldo corretamente
+                        # Buscar dados originais do banco para ter origem_saldo, status_caixa E valor
                         dados_originais = [t for t in todos_registros if t.get('usuario') == usuario_selecionado]
                         origens_dict = {t['id_transacao']: t.get('origem_saldo', 'colaborador') for t in dados_originais}
+                        status_caixa_dict = {t['id_transacao']: t.get('status_caixa', '') for t in dados_originais}
+                        valores_dict = {t['id_transacao']: t.get('valor', 0) for t in dados_originais}
 
                         df_exportar["Origem"] = df_exportar["ID"].map(origens_dict).fillna("colaborador")
+                        df_exportar["Status_Caixa_Raw"] = df_exportar["ID"].map(status_caixa_dict).fillna("")
+                        df_exportar["Valor_Original"] = df_exportar["ID"].map(valores_dict).fillna(0)
 
+                        # Calcular saldo acumulado para detectar se Entrada de Caixa é abertura ou fechamento
+                        saldo_acumulado = 0.0
+                        status_caixa_list = []
+
+                        for idx, row in df_exportar.sort_values('Data_Ordenacao').iterrows():
+                            status_raw = row["Status_Caixa_Raw"]
+                            perfil = row["Perfil"]
+                            valor_original = converter_para_float(row["Valor_Original"])
+                            origem = row["Origem"]
+                            
+                            status_formatado = ""
+                            
+                            if status_raw and status_raw != "" and origem == "colaborador":
+                                try:
+                                    # Converter data para formato brasileiro
+                                    data_obj = datetime.strptime(str(status_raw)[:10], '%Y-%m-%d')
+                                    data_br = data_obj.strftime('%d/%m/%Y')
+                                    
+                                    if perfil == "Entrada de Caixa":
+                                        # Verificar se saldo estava zerado (abertura) ou negativo (fechamento)
+                                        tol = 1e-9
+                                        if abs(saldo_acumulado) < tol:
+                                            status_formatado = f"Abertura: {data_br}"
+                                        elif saldo_acumulado < -tol:
+                                            # Verifica se esta entrada vai zerar o saldo
+                                            saldo_apos = saldo_acumulado + valor_original
+                                            if abs(saldo_apos) < tol:
+                                                status_formatado = f"Fechamento: {data_br}"
+                                            else:
+                                                status_formatado = f"Abertura: {data_br}"
+                                        else:
+                                            status_formatado = f"Abertura: {data_br}"
+                                    elif perfil == "Saída de Caixa":
+                                        status_formatado = f"Fechamento: {data_br}"
+                                except:
+                                    status_formatado = ""
+                            
+                            status_caixa_list.append(status_formatado)
+                            
+                            # Atualizar saldo acumulado
+                            if origem == "colaborador":
+                                if perfil == "Entrada de Caixa":
+                                    saldo_acumulado += valor_original
+                                else:
+                                    saldo_acumulado -= valor_original
+
+                        df_exportar["Status_Caixa"] = status_caixa_list
+
+                        # Separar valores conforme origem_saldo
                         df_exportar["Colaborador"] = df_exportar.apply(
                             lambda x: x["Valor_Num"] if x["Origem"] == "colaborador" else 0.0,
                             axis=1
@@ -1577,34 +1887,49 @@ elif escolha == "Supervisor":
                             axis=1
                         )
 
-                        # Somatórios
-                        total_colab = df_exportar["Colaborador"].sum()
-                        total_emp = df_exportar["Emprestado"].sum()
+                        # Arredondar valores para 2 casas decimais ANTES de somar
+                        df_exportar["Colaborador"] = df_exportar["Colaborador"].round(2)
+                        df_exportar["Emprestado"] = df_exportar["Emprestado"].round(2)
 
-                        # Selecionar colunas desejadas
-                        df_final = df_exportar[["Data", "Perfil", "Descrição", "Tipo", "Colaborador", "Emprestado"]].copy()
+                        # Somatórios com arredondamento
+                        total_colab = round(df_exportar["Colaborador"].sum(), 2)
+                        total_emp = round(df_exportar["Emprestado"].sum(), 2)
+
+                        # Forçar zero se valor for muito pequeno (erro de arredondamento)
+                        if abs(total_colab) < 0.01:
+                            total_colab = 0.0
+                        if abs(total_emp) < 0.01:
+                            total_emp = 0.0
+
+                        # Selecionar colunas desejadas na ordem correta
+                        df_final = df_exportar[["Data_Export", "Hora_Export", "Perfil", "Descrição", "Tipo", "Colaborador", "Emprestado", "Status_Caixa"]].copy()
+
+                        # Renomear colunas para o CSV
+                        df_final.columns = ["Data", "Hora", "Perfil", "Descrição", "Tipo", "Colaborador", "Emprestado", "Status do Caixa"]
 
                         # Adiciona linha de totais
                         df_totais = pd.DataFrame([{
                             "Data": "",
+                            "Hora": "",
                             "Perfil": "",
-                            "Descrição": "Totais",
+                            "Descrição": "TOTAL",
                             "Tipo": "",
                             "Colaborador": total_colab,
-                            "Emprestado": total_emp
+                            "Emprestado": total_emp,
+                            "Status do Caixa": ""
                         }])
 
                         df_final = pd.concat([df_final, df_totais], ignore_index=True)
 
-                        # Criar CSV
-                        csv = df_final.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+                        # Criar CSV com encoding adequado
+                        csv = df_final.to_csv(index=False, sep=";", decimal=",", encoding="utf-8-sig")
 
                         st.download_button(
                             label="📄 Baixar CSV das Transações",
                             data=csv,
                             file_name=f"transacoes_{usuario_selecionado}.csv",
                             mime="text/csv"
-                        )
+)
 
 def calcular_saldo_colaborador_ate(usuario, data_limite_str):
     """
@@ -1644,4 +1969,3 @@ def calcular_saldo_colaborador_ate(usuario, data_limite_str):
         return 0.0
 
 adicionar_rodape()
-
