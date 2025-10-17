@@ -1218,144 +1218,55 @@ elif escolha == "Login":
             
             # Exibir tabela com estilo
             if not df_filtrado.empty:
-                st.markdown("""
-                <style>
-                .minhas-transacoes-container {
-                    border: 1px solid #e0e0e0;
-                    border-radius: 8px;
-                    overflow: hidden;
-                    margin-bottom: 20px;
-                    background-color: #ffffff;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                }
-                
-                .minhas-transacoes-header {
-                    background-color: #f8f9fa;
-                    border-bottom: 1px solid #e0e0e0;
-                    padding: 12px 15px;
-                    font-weight: 600;
-                    color: #2c3e50;
-                    display: grid;
-                    grid-template-columns: 2fr 2fr 2fr 3fr 1fr 1fr;
-                    gap: 1px;
-                    align-items: center;
-                }
-                
-                .minhas-transacoes-row {
-                    display: grid;
-                    grid-template-columns: 2fr 2fr 2fr 3fr 1fr 1fr;
-                    gap: 1px;
-                    align-items: center;
-                    padding: 10px 15px;
-                    border-bottom: 1px solid #f0f0f0;
-                    min-height: 50px;
-                }
-                
-                .minhas-transacoes-row:hover {
-                    background-color: #f8f9fa;
-                }
-                
-                .minhas-transacoes-cell {
-                    padding: 4px 8px;
-                    word-wrap: break-word;
-                }
-                
-                .minhas-transacoes-cell:not(:last-child) {
-                    border-right: 1px solid #f0f0f0;
-                }
-                
-                .valor-entrada { color: #198754; font-weight: bold; }
-                .valor-saida { color: #d9534f; font-weight: bold; }
-                
-                .btn-editar {
-                    background: none;
-                    border: 1px solid #6c757d;
-                    color: #6c757d;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    font-size: 12px;
-                }
-                
-                .btn-editar:hover {
-                    background: #6c757d;
-                    color: white;
-                }
-                
-                .btn-foto {
-                    background: none;
-                    border: 1px solid #007bff;
-                    color: #007bff;
-                    padding: 4px 8px;
-                    border-radius: 4px;
-                    cursor: pointer;
-                    font-size: 12px;
-                }
-                
-                .btn-foto:hover {
-                    background: #007bff;
-                    color: white;
-                }
-                
-                /* Apenas scroll horizontal para mobile */
-                @media (max-width: 768px) {
-                    .minhas-transacoes-container {
-                        overflow-x: auto;
-                        min-width: 600px;
-                    }
-                }
-                </style>
-                """, unsafe_allow_html=True)
-                
-                st.markdown('<div class="minhas-transacoes-container">', unsafe_allow_html=True)
-                
                 # Cabeçalho
-                st.markdown("""
-                <div class="minhas-transacoes-header">
-                    <div class="minhas-transacoes-cell">Data</div>
-                    <div class="minhas-transacoes-cell">Hora</div>
-                    <div class="minhas-transacoes-cell">Perfil</div>
-                    <div class="minhas-transacoes-cell">Valor</div>
-                    <div class="minhas-transacoes-cell">Descrição</div>
-                    <div class="minhas-transacoes-cell">Ações</div>
-                </div>
-                """, unsafe_allow_html=True)
+                col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 3, 1, 1])
+                with col1:
+                    st.markdown("**Data**")
+                with col2:
+                    st.markdown("**Hora**")
+                with col3:
+                    st.markdown("**Perfil**")
+                with col4:
+                    st.markdown("**Valor**")
+                with col5:
+                    st.markdown("**Descrição**")
+                with col6:
+                    st.markdown("**Ações**")
+                
+                st.markdown("---")
                 
                 for index, row in df_filtrado.iterrows():
-                    valor_class = "valor-entrada" if row["Símbolo"] == "+" else "valor-saida"
-                    valor_display = f"{row['Símbolo']} R$ {row['Valor_Display']}"
+                    col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 3, 1, 1])
                     
-                    st.markdown(f"""
-                    <div class="minhas-transacoes-row">
-                        <div class="minhas-transacoes-cell">{row["Data"].split(" ")[0]}</div>
-                        <div class="minhas-transacoes-cell">{row["Hora"]}</div>
-                        <div class="minhas-transacoes-cell">{row["Perfil"]}</div>
-                        <div class="minhas-transacoes-cell"><span class="{valor_class}">{valor_display}</span></div>
-                        <div class="minhas-transacoes-cell">{row["Descrição"]}</div>
-                        <div class="minhas-transacoes-cell">
-                    """, unsafe_allow_html=True)
-                    
-                    # Botões inline
-                    col1, col2 = st.columns(2)
                     with col1:
-                        if st.button("✏️", key=f"edit_{row['ID']}_{index}"):
-                            st.session_state["transacao_editando"] = row["ID"]
-                            st.rerun()
+                        st.write(row["Data"].split(" ")[0])
                     with col2:
-                        if row["Foto"] and os.path.exists(row["Foto"]):
-                            if st.button("📷", key=f"foto_{row['ID']}_{index}"):
-                                st.session_state[f"mostrar_foto_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_{row['ID']}", False)
+                        st.write(row["Hora"])
+                    with col3:
+                        st.write(row["Perfil"])
+                    with col4:
+                        if row["Símbolo"] == "+":
+                            st.markdown(f"<span style='color:green'>+ R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"<span style='color:red'>- R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
+                    with col5:
+                        st.write(row["Descrição"])
+                    with col6:
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            if st.button("✏️", key=f"edit_{row['ID']}_{index}"):
+                                st.session_state["transacao_editando"] = row["ID"]
                                 st.rerun()
-                    
-                    st.markdown("""
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                        with btn_col2:
+                            if row["Foto"] and os.path.exists(row["Foto"]):
+                                if st.button("📷", key=f"foto_{row['ID']}_{index}"):
+                                    st.session_state[f"mostrar_foto_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_{row['ID']}", False)
+                                    st.rerun()
                     
                     if st.session_state.get(f"mostrar_foto_{row['ID']}", False) and row["Foto"] and os.path.exists(row["Foto"]):
                         st.image(row["Foto"], caption="Foto da transação", use_container_width=True)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
+                    
+                    st.markdown("---")
                 
             else:
                 st.info("Nenhuma transação encontrada com os filtros selecionados.")
@@ -1936,133 +1847,63 @@ elif escolha == "Supervisor":
                             df_filtrado_usuario = df_filtrado_usuario[df_filtrado_usuario['Data'].apply(lambda x: int(x.split('/')[1]) == mes_filtro if '/' in x else False)]
                         # Exibir tabela de transações do usuário selecionado
                         # Exibir tabela de transações do usuário selecionado
+                        # Exibir tabela de transações do usuário selecionado
                         if not df_filtrado_usuario.empty:
                             df_display = df_filtrado_usuario.copy()
                             df_display["Valor"] = df_display.apply(
                                 lambda x: f"{x['Símbolo']} R$ {x['Valor_Display']}", axis=1
                             )
                             
-                            st.markdown("""
-                            <style>
-                            .transacoes-container {
-                                border: 1px solid #e0e0e0;
-                                border-radius: 8px;
-                                overflow: hidden;
-                                margin-bottom: 20px;
-                                background-color: #ffffff;
-                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                            }
-                            
-                            .transacoes-header {
-                                background-color: #f8f9fa;
-                                border-bottom: 1px solid #e0e0e0;
-                                padding: 12px 15px;
-                                font-weight: 600;
-                                color: #2c3e50;
-                                display: grid;
-                                grid-template-columns: 1.5fr 1fr 2fr 2fr 3fr 1fr 1fr;
-                                gap: 1px;
-                                align-items: center;
-                            }
-                            
-                            .transacoes-row {
-                                display: grid;
-                                grid-template-columns: 1.5fr 1fr 2fr 2fr 3fr 1fr 1fr;
-                                gap: 1px;
-                                align-items: center;
-                                padding: 10px 15px;
-                                border-bottom: 1px solid #f0f0f0;
-                                min-height: 50px;
-                            }
-                            
-                            .transacoes-row:hover {
-                                background-color: #f8f9fa;
-                            }
-                            
-                            .transacoes-cell {
-                                padding: 4px 8px;
-                                word-wrap: break-word;
-                            }
-                            
-                            .transacoes-cell:not(:last-child) {
-                                border-right: 1px solid #f0f0f0;
-                            }
-                            
-                            .valor-entrada { color: #198754; font-weight: bold; }
-                            .valor-saida { color: #d9534f; font-weight: bold; }
-                            
-                            .btn-foto {
-                                background: none;
-                                border: 1px solid #007bff;
-                                color: #007bff;
-                                padding: 4px 8px;
-                                border-radius: 4px;
-                                cursor: pointer;
-                                font-size: 12px;
-                            }
-                            
-                            .btn-foto:hover {
-                                background: #007bff;
-                                color: white;
-                            }
-                            
-                            /* Apenas scroll horizontal para mobile */
-                            @media (max-width: 768px) {
-                                .transacoes-container {
-                                    overflow-x: auto;
-                                    min-width: 700px;
-                                }
-                            }
-                            </style>
-                            """, unsafe_allow_html=True)
-                            
-                            st.markdown('<div class="transacoes-container">', unsafe_allow_html=True)
-                            
                             # Cabeçalho
-                            st.markdown("""
-                            <div class="transacoes-header">
-                                <div class="transacoes-cell">Data</div>
-                                <div class="transacoes-cell">Hora</div>
-                                <div class="transacoes-cell">Perfil</div>
-                                <div class="transacoes-cell">Valor</div>
-                                <div class="transacoes-cell">Descrição</div>
-                                <div class="transacoes-cell">Tipo</div>
-                                <div class="transacoes-cell">Foto</div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            col1, col2, col3, col4, col5, col6, col7 = st.columns([1.5, 1, 2, 2, 3, 1, 1])
+                            with col1:
+                                st.markdown("**Data**")
+                            with col2:
+                                st.markdown("**Hora**")
+                            with col3:
+                                st.markdown("**Perfil**")
+                            with col4:
+                                st.markdown("**Valor**")
+                            with col5:
+                                st.markdown("**Descrição**")
+                            with col6:
+                                st.markdown("**Tipo**")
+                            with col7:
+                                st.markdown("**Foto**")
+                            
+                            st.markdown("---")
                             
                             for index, row in df_filtrado_usuario.iterrows():
-                                valor_class = "valor-entrada" if row["Símbolo"] == "+" else "valor-saida"
-                                valor_display = f"{row['Símbolo']} R$ {row['Valor_Display']}"
+                                col1, col2, col3, col4, col5, col6, col7 = st.columns([1.5, 1, 2, 2, 3, 1, 1])
                                 
-                                st.markdown(f"""
-                                <div class="transacoes-row">
-                                    <div class="transacoes-cell">{row["Data"].split(" ")[0]}</div>
-                                    <div class="transacoes-cell">{row["Hora"]}</div>
-                                    <div class="transacoes-cell">{row["Perfil"]}</div>
-                                    <div class="transacoes-cell"><span class="{valor_class}">{valor_display}</span></div>
-                                    <div class="transacoes-cell">{row["Descrição"]}</div>
-                                    <div class="transacoes-cell">{row["Tipo"]}</div>
-                                    <div class="transacoes-cell">
-                                """, unsafe_allow_html=True)
-                                
-                                if row["Foto"] and os.path.exists(row["Foto"]):
-                                    if st.button("📷", key=f"foto_sup_{row['ID']}_{index}"):
-                                        st.session_state[f"mostrar_foto_sup_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_sup_{row['ID']}", False)
-                                        st.rerun()
-                                
-                                st.markdown("""
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                with col1:
+                                    st.write(row["Data"].split(" ")[0])
+                                with col2:
+                                    st.write(row["Hora"])
+                                with col3:
+                                    st.write(row["Perfil"])
+                                with col4:
+                                    if row["Símbolo"] == "+":
+                                        st.markdown(f"<span style='color:green'>+ R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"<span style='color:red'>- R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
+                                with col5:
+                                    st.write(row["Descrição"])
+                                with col6:
+                                    st.write(row["Tipo"])
+                                with col7:
+                                    if row["Foto"] and os.path.exists(row["Foto"]):
+                                        if st.button("📷", key=f"foto_sup_{row['ID']}_{index}"):
+                                            st.session_state[f"mostrar_foto_sup_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_sup_{row['ID']}", False)
+                                            st.rerun()
                                 
                                 if st.session_state.get(f"mostrar_foto_sup_{row['ID']}", False) and row["Foto"] and os.path.exists(row["Foto"]):
                                     st.image(row["Foto"], caption="Foto da transação", use_container_width=True)
                                     if st.button("Fechar foto", key=f"fechar_foto_sup_{row['ID']}_{index}"):
                                         st.session_state[f"mostrar_foto_sup_{row['ID']}"] = False
                                         st.rerun()
-                            
-                            st.markdown('</div>', unsafe_allow_html=True)
+                                
+                                st.markdown("---")
                             
                             # Resto do código permanece igual (saldos, download CSV, etc.)
                             # ... [mantenha o código existente para saldos e download]
