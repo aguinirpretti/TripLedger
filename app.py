@@ -1218,44 +1218,144 @@ elif escolha == "Login":
             
             # Exibir tabela com estilo
             if not df_filtrado.empty:
-                # Aplicar formatação aos valores para exibição
-                df_display = df_filtrado.copy()
-                df_display["Valor"] = df_display.apply(
-                    lambda x: f"{x['Símbolo']} R$ {x['Valor_Display']}", axis=1
-                )
+                st.markdown("""
+                <style>
+                .minhas-transacoes-container {
+                    border: 1px solid #e0e0e0;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    margin-bottom: 20px;
+                    background-color: #ffffff;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
                 
-                # Criar coluna de ações com botão de edição para cada linha
-                df_display["Ações"] = None  # Coluna vazia que será preenchida com botões
+                .minhas-transacoes-header {
+                    background-color: #f8f9fa;
+                    border-bottom: 1px solid #e0e0e0;
+                    padding: 12px 15px;
+                    font-weight: 600;
+                    color: #2c3e50;
+                    display: grid;
+                    grid-template-columns: 2fr 2fr 2fr 3fr 1fr 1fr;
+                    gap: 1px;
+                    align-items: center;
+                }
                 
-                # Exibir a tabela com formatação personalizada
-                for index, row in df_display.iterrows():
-                    col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 3, 1, 1])
+                .minhas-transacoes-row {
+                    display: grid;
+                    grid-template-columns: 2fr 2fr 2fr 3fr 1fr 1fr;
+                    gap: 1px;
+                    align-items: center;
+                    padding: 10px 15px;
+                    border-bottom: 1px solid #f0f0f0;
+                    min-height: 50px;
+                }
+                
+                .minhas-transacoes-row:hover {
+                    background-color: #f8f9fa;
+                }
+                
+                .minhas-transacoes-cell {
+                    padding: 4px 8px;
+                    word-wrap: break-word;
+                }
+                
+                .minhas-transacoes-cell:not(:last-child) {
+                    border-right: 1px solid #f0f0f0;
+                }
+                
+                .valor-entrada { color: #198754; font-weight: bold; }
+                .valor-saida { color: #d9534f; font-weight: bold; }
+                
+                .btn-editar {
+                    background: none;
+                    border: 1px solid #6c757d;
+                    color: #6c757d;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 12px;
+                }
+                
+                .btn-editar:hover {
+                    background: #6c757d;
+                    color: white;
+                }
+                
+                .btn-foto {
+                    background: none;
+                    border: 1px solid #007bff;
+                    color: #007bff;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 12px;
+                }
+                
+                .btn-foto:hover {
+                    background: #007bff;
+                    color: white;
+                }
+                
+                /* Apenas scroll horizontal para mobile */
+                @media (max-width: 768px) {
+                    .minhas-transacoes-container {
+                        overflow-x: auto;
+                        min-width: 600px;
+                    }
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                st.markdown('<div class="minhas-transacoes-container">', unsafe_allow_html=True)
+                
+                # Cabeçalho
+                st.markdown("""
+                <div class="minhas-transacoes-header">
+                    <div class="minhas-transacoes-cell">Data</div>
+                    <div class="minhas-transacoes-cell">Hora</div>
+                    <div class="minhas-transacoes-cell">Perfil</div>
+                    <div class="minhas-transacoes-cell">Valor</div>
+                    <div class="minhas-transacoes-cell">Descrição</div>
+                    <div class="minhas-transacoes-cell">Ações</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                for index, row in df_filtrado.iterrows():
+                    valor_class = "valor-entrada" if row["Símbolo"] == "+" else "valor-saida"
+                    valor_display = f"{row['Símbolo']} R$ {row['Valor_Display']}"
+                    
+                    st.markdown(f"""
+                    <div class="minhas-transacoes-row">
+                        <div class="minhas-transacoes-cell">{row["Data"].split(" ")[0]}</div>
+                        <div class="minhas-transacoes-cell">{row["Hora"]}</div>
+                        <div class="minhas-transacoes-cell">{row["Perfil"]}</div>
+                        <div class="minhas-transacoes-cell"><span class="{valor_class}">{valor_display}</span></div>
+                        <div class="minhas-transacoes-cell">{row["Descrição"]}</div>
+                        <div class="minhas-transacoes-cell">
+                    """, unsafe_allow_html=True)
+                    
+                    # Botões inline
+                    col1, col2 = st.columns(2)
                     with col1:
-                        st.write(row["Data"].split(" ")[0])  # Apenas a data sem a hora
-                    with col2:
-                        st.write(row["Hora"])  # Hora
-                    with col3:
-                        st.write(row["Perfil"])
-                    with col4:
-                        # Mostrar valor com a cor correta
-                        if row["Símbolo"] == "+":
-                            st.markdown(f"<span style='color:green'>+ R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
-                        else:
-                            st.markdown(f"<span style='color:red'>- R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
-                    with col5:
-                        st.write(row["Descrição"])
-                    with col6:
                         if st.button("✏️", key=f"edit_{row['ID']}_{index}"):
                             st.session_state["transacao_editando"] = row["ID"]
                             st.rerun()
+                    with col2:
                         if row["Foto"] and os.path.exists(row["Foto"]):
-                            foto_key = f"foto_{row['ID']}_{index}"
-                            if st.button("📷", key=foto_key):
+                            if st.button("📷", key=f"foto_{row['ID']}_{index}"):
                                 st.session_state[f"mostrar_foto_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_{row['ID']}", False)
                                 st.rerun()
+                    
+                    st.markdown("""
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
                     if st.session_state.get(f"mostrar_foto_{row['ID']}", False) and row["Foto"] and os.path.exists(row["Foto"]):
                         st.image(row["Foto"], caption="Foto da transação", use_container_width=True)
-                    st.markdown("---")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
                 
             else:
                 st.info("Nenhuma transação encontrada com os filtros selecionados.")
@@ -1379,18 +1479,132 @@ elif escolha == "Supervisor":
                 df_filtrado = df_filtrado.sort_values(by="Saldo", ascending=False)
                 
                 # Exibir tabela customizada incluindo a nova coluna "Dias de Caixa"
+                # Exibir tabela customizada incluindo a nova coluna "Dias de Caixa"
+                # Exibir tabela customizada incluindo a nova coluna "Dias de Caixa"
                 st.markdown("### Status de Usuários")
-                # Cabeçalho
-                col_u, col_s, col_sc, col_se, col_stat, col_d, col_df = st.columns([2, 2, 2, 2, 1.5, 3, 2])
-                col_u.markdown("**Usuário**")
-                col_s.markdown("**Saldo Total**")
-                col_sc.markdown("**Saldo Colab.**")
-                col_se.markdown("**Saldo Emp.**")
-                col_stat.markdown("**Status**")
-                col_d.markdown("**Dias de Caixa**")
-                col_df.markdown("**Fechamento do Caixa**")
+
+                # CSS personalizado para a planilha responsiva
+                st.markdown("""
+                <style>
+                .planilha-container {
+                    border: 1px solid #e0e0e0;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    margin-bottom: 20px;
+                    background-color: #ffffff;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+
+                .planilha-header {
+                    background-color: #f8f9fa;
+                    border-bottom: 1px solid #e0e0e0;
+                    padding: 12px 15px;
+                    font-weight: 600;
+                    color: #2c3e50;
+                    display: grid;
+                    grid-template-columns: 2fr 2fr 2fr 2fr 1.5fr 3fr 2fr;
+                    gap: 1px;
+                    align-items: center;
+                }
+
+                .planilha-row {
+                    display: grid;
+                    grid-template-columns: 2fr 2fr 2fr 2fr 1.5fr 3fr 2fr;
+                    gap: 1px;
+                    align-items: center;
+                    padding: 10px 15px;
+                    border-bottom: 1px solid #f0f0f0;
+                    min-height: 50px;
+                }
+
+                .planilha-row:hover {
+                    background-color: #f8f9fa;
+                }
+
+                .planilha-cell {
+                    padding: 4px 8px;
+                    word-wrap: break-word;
+                }
+
+                .planilha-cell:not(:last-child) {
+                    border-right: 1px solid #f0f0f0;
+                }
+
+                .status-excelente { color: #0b5394; font-weight: bold; }
+                .status-bom { color: #198754; font-weight: bold; }
+                .status-regular { color: #ff9900; font-weight: bold; }
+                .status-negativo { color: #d9534f; font-weight: bold; }
+
+                .dias-alerta { 
+                    background-color: #fff3cd; 
+                    padding: 4px 8px; 
+                    border-radius: 4px; 
+                    font-weight: bold; 
+                    border: 1px solid #ffeaa7;
+                }
+                .dias-critico { 
+                    background-color: #f8d7da; 
+                    padding: 4px 8px; 
+                    border-radius: 4px; 
+                    font-weight: bold; 
+                    border: 1px solid #f5c6cb;
+                }
+                .dias-normal { 
+                    padding: 4px 8px; 
+                    border-radius: 4px; 
+                }
+
+                .data-vencida { 
+                    color: #d9534f; 
+                    font-weight: bold; 
+                    background-color: #f8d7da;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                }
+                .data-futura { 
+                    color: #0b5394; 
+                    font-weight: bold; 
+                    background-color: #d1ecf1;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                }
+
+                /* Apenas scroll horizontal para mobile */
+                @media (max-width: 768px) {
+                    .planilha-container {
+                        overflow-x: auto;
+                        min-width: 800px;
+                    }
+                }
+                </style>
+                """, unsafe_allow_html=True)
+
+                # Definir color_map
+                color_map = {
+                    "blue": "#0b5394",
+                    "green": "#198754", 
+                    "orange": "#ff9900",
+                    "red": "#d9534f"
+                }
+
+                # Container da planilha
+                st.markdown('<div class="planilha-container">', unsafe_allow_html=True)
+
+                # Cabeçalho da planilha
+                st.markdown("""
+                <div class="planilha-header">
+                    <div class="planilha-cell">Usuário</div>
+                    <div class="planilha-cell">Saldo Total</div>
+                    <div class="planilha-cell">Saldo Colab.</div>
+                    <div class="planilha-cell">Saldo Emp.</div>
+                    <div class="planilha-cell">Status</div>
+                    <div class="planilha-cell">Dias de Caixa</div>
+                    <div class="planilha-cell">Fechamento do Caixa</div>
+                </div>
+                """, unsafe_allow_html=True)
 
                 hoje = datetime.now().date()
+
                 # Para cada usuário calcular dias de caixa aberto
                 for _, row in df_filtrado.iterrows():
                     usuario = row["Usuário"]
@@ -1413,7 +1627,7 @@ elif escolha == "Supervisor":
                     ]
                     
                     dias_display = ""
-                    dias_color = None
+                    dias_css_class = "dias-normal"
                     data_fechamento = ""
                     inicio_encontrado = None
                     fechamento_encontrado = None
@@ -1451,9 +1665,11 @@ elif escolha == "Supervisor":
                                     dias_display = f"{dias} dias de caixa em aberto"
                                     
                                     if dias >= 30:
-                                        dias_color = "red"
+                                        dias_css_class = "dias-critico"
                                     elif dias >= 25:
-                                        dias_color = "orange"
+                                        dias_css_class = "dias-alerta"
+                                    else:
+                                        dias_css_class = "dias-normal"
                                     
                                     # Calcular data de fechamento (30 dias após abertura)
                                     fechamento_calculado = inicio_encontrado + pd.Timedelta(days=30)
@@ -1464,42 +1680,37 @@ elif escolha == "Supervisor":
                             dias_display = ""
                             data_fechamento = ""
                     
-                    # Renderizar colunas
-                    col_u, col_s, col_sc, col_se, col_stat, col_d, col_df = st.columns([2, 2, 2, 2, 1.5, 3, 2])
-                    col_u.write(usuario)
+                    # Determinar classe CSS para o status
+                    status_class = f"status-{status.lower()}"
                     
-                    color_map = {"blue":"#0b5394","green":"#198754","orange":"#ff9900","red":"#d9534f"}
-                    saldo_color = color_map.get(cor, "black")
-                    col_s.markdown(f"<span style='color:{saldo_color}; font-weight:bold'>{saldo_total_fmt}</span>", unsafe_allow_html=True)
-                    col_sc.write(saldo_colab_fmt)
-                    col_se.write(saldo_emp_fmt)
-                    col_stat.write(status)
-                    
-                    # Mostrar dias apenas se caixa estiver aberto
-                    if dias_display:
-                        if dias_color == "red":
-                            col_d.markdown(f"<span style='color:red; font-weight:bold'>{dias_display}</span>", unsafe_allow_html=True)
-                        elif dias_color == "orange":
-                            col_d.markdown(f"<span style='color:orange; font-weight:bold'>{dias_display}</span>", unsafe_allow_html=True)
-                        else:
-                            col_d.write(dias_display)
-                    else:
-                        col_d.write("")
-                    
-                    # Exibir data de fechamento apenas se caixa estiver aberto
+                    # Determinar classe CSS para data de fechamento
+                    data_css_class = ""
                     if data_fechamento:
-                        # Verificar se já passou da data
                         try:
                             fechamento_dt = datetime.strptime(data_fechamento, '%d/%m/%Y').date()
                             if hoje >= fechamento_dt:
-                                col_df.markdown(f"<span style='color:red; font-weight:bold'>{data_fechamento}</span>", unsafe_allow_html=True)
+                                data_css_class = "data-vencida"
                             else:
-                                col_df.markdown(f"<span style='color:blue; font-weight:bold'>{data_fechamento}</span>", unsafe_allow_html=True)
+                                data_css_class = "data-futura"
                         except:
-                            col_df.write(data_fechamento)
-                    else:
-                        col_df.write("")
-                
+                            data_css_class = ""
+                    
+                    # Linha da planilha
+                    st.markdown(f"""
+                    <div class="planilha-row">
+                        <div class="planilha-cell">{usuario}</div>
+                        <div class="planilha-cell"><span style='color:{color_map.get(cor, "black")}; font-weight:bold'>{saldo_total_fmt}</span></div>
+                        <div class="planilha-cell">{saldo_colab_fmt}</div>
+                        <div class="planilha-cell">{saldo_emp_fmt}</div>
+                        <div class="planilha-cell"><span class="{status_class}">{status}</span></div>
+                        <div class="planilha-cell"><span class="{dias_css_class}">{dias_display if dias_display else ''}</span></div>
+                        <div class="planilha-cell"><span class="{data_css_class}">{data_fechamento if data_fechamento else ''}</span></div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # Fechar container da planilha
+                st.markdown('</div>', unsafe_allow_html=True)
+                                
                 # Filtro por mês e ano
                 st.subheader("Filtrar por mês e ano")
                 meses = ["Todos", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -1723,40 +1934,138 @@ elif escolha == "Supervisor":
                         if mes_filtro_nome != "Todos":
                             mes_filtro = meses.index(mes_filtro_nome)
                             df_filtrado_usuario = df_filtrado_usuario[df_filtrado_usuario['Data'].apply(lambda x: int(x.split('/')[1]) == mes_filtro if '/' in x else False)]
-                        # Exibir tabela de transações do usuário
+                        # Exibir tabela de transações do usuário selecionado
+                        # Exibir tabela de transações do usuário selecionado
                         if not df_filtrado_usuario.empty:
                             df_display = df_filtrado_usuario.copy()
                             df_display["Valor"] = df_display.apply(
                                 lambda x: f"{x['Símbolo']} R$ {x['Valor_Display']}", axis=1
                             )
-                            for index, row in df_display.iterrows():
-                                col1, col1b, col2, col3, col4, col5, col6 = st.columns([1.5, 1, 2, 2, 3, 1, 1])
-                                with col1:
-                                    st.write(row["Data"].split(" ")[0])  # Data
-                                with col1b:
-                                    st.write(row["Hora"])  # Hora
-                                with col2:
-                                    st.write(row["Perfil"])
-                                with col3:
-                                    if row["Símbolo"] == "+":
-                                        st.markdown(f"<span style='color:green'>+ R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
-                                    else:
-                                        st.markdown(f"<span style='color:red'>- R$ {row['Valor_Display']}</span>", unsafe_allow_html=True)
-                                with col4:
-                                    st.write(row["Descrição"])
-                                with col5:
-                                    st.write(row["Tipo"])
-                                with col6:
-                                    if row["Foto"] and os.path.exists(row["Foto"]):
-                                        if st.button("📷", key=f"foto_sup_{row['ID']}_{index}"):
-                                            st.session_state[f"mostrar_foto_sup_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_sup_{row['ID']}", False)
-                                            st.rerun()
+                            
+                            st.markdown("""
+                            <style>
+                            .transacoes-container {
+                                border: 1px solid #e0e0e0;
+                                border-radius: 8px;
+                                overflow: hidden;
+                                margin-bottom: 20px;
+                                background-color: #ffffff;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                            }
+                            
+                            .transacoes-header {
+                                background-color: #f8f9fa;
+                                border-bottom: 1px solid #e0e0e0;
+                                padding: 12px 15px;
+                                font-weight: 600;
+                                color: #2c3e50;
+                                display: grid;
+                                grid-template-columns: 1.5fr 1fr 2fr 2fr 3fr 1fr 1fr;
+                                gap: 1px;
+                                align-items: center;
+                            }
+                            
+                            .transacoes-row {
+                                display: grid;
+                                grid-template-columns: 1.5fr 1fr 2fr 2fr 3fr 1fr 1fr;
+                                gap: 1px;
+                                align-items: center;
+                                padding: 10px 15px;
+                                border-bottom: 1px solid #f0f0f0;
+                                min-height: 50px;
+                            }
+                            
+                            .transacoes-row:hover {
+                                background-color: #f8f9fa;
+                            }
+                            
+                            .transacoes-cell {
+                                padding: 4px 8px;
+                                word-wrap: break-word;
+                            }
+                            
+                            .transacoes-cell:not(:last-child) {
+                                border-right: 1px solid #f0f0f0;
+                            }
+                            
+                            .valor-entrada { color: #198754; font-weight: bold; }
+                            .valor-saida { color: #d9534f; font-weight: bold; }
+                            
+                            .btn-foto {
+                                background: none;
+                                border: 1px solid #007bff;
+                                color: #007bff;
+                                padding: 4px 8px;
+                                border-radius: 4px;
+                                cursor: pointer;
+                                font-size: 12px;
+                            }
+                            
+                            .btn-foto:hover {
+                                background: #007bff;
+                                color: white;
+                            }
+                            
+                            /* Apenas scroll horizontal para mobile */
+                            @media (max-width: 768px) {
+                                .transacoes-container {
+                                    overflow-x: auto;
+                                    min-width: 700px;
+                                }
+                            }
+                            </style>
+                            """, unsafe_allow_html=True)
+                            
+                            st.markdown('<div class="transacoes-container">', unsafe_allow_html=True)
+                            
+                            # Cabeçalho
+                            st.markdown("""
+                            <div class="transacoes-header">
+                                <div class="transacoes-cell">Data</div>
+                                <div class="transacoes-cell">Hora</div>
+                                <div class="transacoes-cell">Perfil</div>
+                                <div class="transacoes-cell">Valor</div>
+                                <div class="transacoes-cell">Descrição</div>
+                                <div class="transacoes-cell">Tipo</div>
+                                <div class="transacoes-cell">Foto</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            for index, row in df_filtrado_usuario.iterrows():
+                                valor_class = "valor-entrada" if row["Símbolo"] == "+" else "valor-saida"
+                                valor_display = f"{row['Símbolo']} R$ {row['Valor_Display']}"
+                                
+                                st.markdown(f"""
+                                <div class="transacoes-row">
+                                    <div class="transacoes-cell">{row["Data"].split(" ")[0]}</div>
+                                    <div class="transacoes-cell">{row["Hora"]}</div>
+                                    <div class="transacoes-cell">{row["Perfil"]}</div>
+                                    <div class="transacoes-cell"><span class="{valor_class}">{valor_display}</span></div>
+                                    <div class="transacoes-cell">{row["Descrição"]}</div>
+                                    <div class="transacoes-cell">{row["Tipo"]}</div>
+                                    <div class="transacoes-cell">
+                                """, unsafe_allow_html=True)
+                                
+                                if row["Foto"] and os.path.exists(row["Foto"]):
+                                    if st.button("📷", key=f"foto_sup_{row['ID']}_{index}"):
+                                        st.session_state[f"mostrar_foto_sup_{row['ID']}"] = not st.session_state.get(f"mostrar_foto_sup_{row['ID']}", False)
+                                        st.rerun()
+                                
+                                st.markdown("""
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
                                 if st.session_state.get(f"mostrar_foto_sup_{row['ID']}", False) and row["Foto"] and os.path.exists(row["Foto"]):
                                     st.image(row["Foto"], caption="Foto da transação", use_container_width=True)
                                     if st.button("Fechar foto", key=f"fechar_foto_sup_{row['ID']}_{index}"):
                                         st.session_state[f"mostrar_foto_sup_{row['ID']}"] = False
                                         st.rerun()
-                                st.markdown("---")
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            
+                            # Resto do código permanece igual (saldos, download CSV, etc.)
+                            # ... [mantenha o código existente para saldos e download]
                             # Mostrar saldo do período filtrado usando valores numéricos
                             try:
                                 total_entradas = df_display[df_display["Tipo"] == "Entrada"]["Valor_Display"].apply(lambda v: float(str(v).replace('.', '').replace(',', '.'))).sum()
